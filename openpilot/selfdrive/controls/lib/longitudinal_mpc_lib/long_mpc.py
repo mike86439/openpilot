@@ -228,6 +228,7 @@ class LongitudinalMpc:
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = LongitudinalPlanSource.cruise
+    self.last_lead_track_id = 0
 
   def reset(self):
     self.solver.reset()
@@ -301,17 +302,19 @@ class LongitudinalMpc:
 
   def process_lead(self, lead):
     v_ego = self.x0[1]
+    # Fake a fast lead car, so mpc can keep running in the same mode
+    x_lead = 50.0
+    v_lead = v_ego + 10.0
+    a_lead = 0.0
+    a_lead_tau = _LEAD_ACCEL_TAU
+
     if lead is not None and lead.present:
-      x_lead = lead.dRel
-      v_lead = lead.vLead
-      a_lead = lead.aLeadK
-      a_lead_tau = lead.aLeadTau
-    else:
-      # Fake a fast lead car, so mpc can keep running in the same mode
-      x_lead = 50.0
-      v_lead = v_ego + 10.0
-      a_lead = 0.0
-      a_lead_tau = _LEAD_ACCEL_TAU
+      if self.last_lead_track_id == lead.radarTrackId:
+        x_lead = lead.dRel
+        v_lead = lead.vLead
+        a_lead = lead.aLeadK
+        a_lead_tau = lead.aLeadTau
+      self.last_lead_track_id = lead.radarTrackId
 
     # MPC will not converge if immediate crash is expected
     # Clip lead distance to what is still possible to brake for
