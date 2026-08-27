@@ -132,7 +132,10 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks
   # stationary radar points can be false positives
   dist_sane = abs(track.dRel - offset_vision_dist) < max([(offset_vision_dist)*.25, 5.0])
   vel_sane = (abs(track.vRel + v_ego - lead.v[0]) < 10) or (v_ego + track.vRel > 3)
-  if dist_sane:
+
+  # vel_sane only applies below 20 m/s: above that speed the model overestimates vLead for stopped leads,
+  # which makes vel_sane reject real stopped tracks (late braking)
+  if dist_sane and (vel_sane if v_ego < 20.0 else True):
     return track
   else:
     return None

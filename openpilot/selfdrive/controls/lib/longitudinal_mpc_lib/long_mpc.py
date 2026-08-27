@@ -228,7 +228,6 @@ class LongitudinalMpc:
     self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.reset()
     self.source = LongitudinalPlanSource.cruise
-    self.last_lead_track_id = 0
 
   def reset(self):
     self.solver.reset()
@@ -258,6 +257,9 @@ class LongitudinalMpc:
     self.x0 = np.zeros(X_DIM)
     self.lead_xv_0 = np.zeros((N+1, 2))
     self.lead_xv_1 = np.zeros((N+1, 2))
+    # Per-lead radar track confirmation state (leadOne, leadTwo)
+    self.last_lead_track_id = [0, 0]
+    self.stopped_match_count = [0, 0]
     self.set_weights()
 
   def set_cost_weights(self, cost_weights, constraint_cost_weights):
@@ -300,7 +302,7 @@ class LongitudinalMpc:
     lead_xv = np.column_stack((x_lead_traj, v_lead_traj))
     return lead_xv
 
-  def process_lead(self, lead):
+  def process_lead(self, lead, idx):
     v_ego = self.x0[1]
     # Fake a fast lead car, so mpc can keep running in the same mode
     x_lead = 50.0
@@ -309,12 +311,29 @@ class LongitudinalMpc:
     a_lead_tau = _LEAD_ACCEL_TAU
 
     if lead is not None and lead.present:
-      if self.last_lead_track_id == lead.radarTrackId:
+      # Count how long the same radar track has been the matched lead. Could be false positive.
+      if lead.radarTrackId == self.last_lead_track_id[idx]:
+        self.stopped_match_count[idx] += 1
+      else:
+        self.stopped_match_count[idx] = 1
+      self.last_lead_track_id[idx] = lead.radarTrackId
+
+      if lead.radarTrackId == -1 or lead.vLead > 3.0 or self.stopped_match_count[idx] >= 5 or v_ego < 20.0:
+        # Vision-only lead, moving lead, confirmed stationary track, or low speed: use the lead's actual data.
         x_lead = lead.dRel
         v_lead = lead.vLead
         a_lead = lead.aLeadK
         a_lead_tau = lead.aLeadTau
-      self.last_lead_track_id = lead.radarTrackId
+      else:
+        # Unconfirmed stationary track (possibly an overhead object): follow
+        # softly instead of braking hard while it's being verified.
+        x_lead = lead.dRel
+        v_lead = v_ego * 0.75
+        a_lead = 0.0
+        a_lead_tau = lead.aLeadTau
+    else:
+      # Lead absent: drop the confirmation so a reappearing lead must re-confirm.
+      self.stopped_match_count[idx] = 0
 
     # MPC will not converge if immediate crash is expected
     # Clip lead distance to what is still possible to brake for
@@ -329,8 +348,8 @@ class LongitudinalMpc:
     t_follow = get_T_FOLLOW(personality)
     v_ego = self.x0[1]
 
-    lead_xv_0 = self.process_lead(radarstate.leadOne)
-    lead_xv_1 = self.process_lead(radarstate.leadTwo)
+    lead_xv_0 = self.process_lead(radarstate.leadOne, 0)
+    lead_xv_1 = self.process_lead(radarstate.leadTwo, 1)
 
     # To estimate a safe distance from a moving lead, we calculate how much stopping
     # distance that lead needs as a minimum. We can add that to the current distance
