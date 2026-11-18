@@ -18,3 +18,16 @@ openpilot/selfdrive/assets/sounds/nrdr_june_2026/*.wav -filter -diff -merge -tex
 
 openpilot/selfdrive/car/tests/test_models_segs.txt filter=lfs diff=lfs merge=lfs -text
 openpilot/common/hardware/comma/updater filter=lfs diff=lfs merge=lfs -text
+
+# The trees flattened in 91621ac are ordinary git trees committed in full, not entries in the
+# comma/sunnypilot LFS store - their binaries are plain blobs in this repo's history. The *.png,
+# *.svg, *.ttf, *.wav patterns above would hand them to git-lfs anyway, and on a machine that has
+# git-lfs configured (the car) git then compares a pointer against a raw blob and reports those files
+# as modified forever. Same treatment nrdr already gives its own engagement pack above.
+msgq_repo/** -filter -diff -merge
+opendbc_repo/** -filter -diff -merge
+panda/** -filter -diff -merge
+rednose_repo/** -filter -diff -merge
+teleoprtc_repo/** -filter -diff -merge
+tinygrad_repo/** -filter -diff -merge
+openpilot/sunnypilot/neural_network_data/** -filter -diff -merge
