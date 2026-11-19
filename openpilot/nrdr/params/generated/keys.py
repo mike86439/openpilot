@@ -174,6 +174,7 @@ class NrdrParamKey(StrEnum):
   NRDR_YAW_DELAY_SCHEDULE = "NrdrYawDelaySchedule"
   NRDR_YAW_COMMAND_DELAY_LOW = "NrdrYawCommandDelayLow"
   NRDR_YAW_COMMAND_DELAY_HIGH = "NrdrYawCommandDelayHigh"
+  DISABLE_EXCESSIVE_ACTUATION_CHECK = "DisableExcessiveActuationCheck"
 
 
 ADDED_KEYS: frozenset[NrdrParamKey] = frozenset((
@@ -346,6 +347,7 @@ ADDED_KEYS: frozenset[NrdrParamKey] = frozenset((
   NrdrParamKey.NRDR_YAW_DELAY_SCHEDULE,
   NrdrParamKey.NRDR_YAW_COMMAND_DELAY_LOW,
   NrdrParamKey.NRDR_YAW_COMMAND_DELAY_HIGH,
+  NrdrParamKey.DISABLE_EXCESSIVE_ACTUATION_CHECK,
 ))
 
 OVERRIDDEN_KEYS: frozenset[NrdrParamKey] = frozenset((

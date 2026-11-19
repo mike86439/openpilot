@@ -3,6 +3,7 @@ from enum import StrEnum, auto
 
 from openpilot.cereal import messaging
 from opendbc.car.structs import car
+from openpilot.common.params import UnknownKeyName
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.locationd.helpers import Pose
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
@@ -11,6 +12,29 @@ from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 
 MIN_EXCESSIVE_ACTUATION_COUNT = int(0.25 / DT_CTRL)
 MIN_LATERAL_ENGAGE_BUFFER = int(1 / DT_CTRL)
+
+
+# The switch that turns the check below off, and with it the alert and everything that makes the alert sticky.
+# Registered in nrdr/params/specs.py as a PERSISTENT BOOL defaulting to "0", so a car that never asks for it runs
+# upstream's behaviour unchanged. Disabled means all three parts:
+#   * ExcessiveActuationCheck is never updated, so no new Offroad_ExcessiveActuation is written;
+#   * selfdrived does not consult a stale one at startup, so it stops adding EventName.excessiveActuation
+#     (SOFT_DISABLE + NO_ENTRY) every frame - that event is what refuses lateral control after an alert;
+#   * hardwared's no_excessive_actuation startup condition passes, so a stale alert cannot block startup.
+# What it deliberately does NOT do is clear the parameter: a stale alert stays on disk, and re-enabling the check
+# (or the UI's Acknowledge button) restores it. The same key name is registered in the ptm111826 port, so one
+# written value answers the same way whichever tree the car is running.
+EXCESSIVE_ACTUATION_DISABLE_KEY = "DisableExcessiveActuationCheck"
+
+
+def excessive_actuation_disabled(params) -> bool:
+  # Read the switch without assuming the compiled parameter registry this process links against knows it: the C++
+  # registry is generated from nrdr/params/specs.py, so a tree whose params extension predates the key answers
+  # UnknownKeyName. That is answered as "not disabled", which is what an unregistered key means here.
+  try:
+    return bool(params.get_bool(EXCESSIVE_ACTUATION_DISABLE_KEY))
+  except UnknownKeyName:
+    return False
 
 
 class ExcessiveActuationType(StrEnum):

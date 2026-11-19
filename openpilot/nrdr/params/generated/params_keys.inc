@@ -168,3 +168,4 @@
     {"NrdrYawDelaySchedule", {PERSISTENT | BACKUP, BOOL, "1"}},
     {"NrdrYawCommandDelayLow", {PERSISTENT | BACKUP, FLOAT, "0.145"}},
     {"NrdrYawCommandDelayHigh", {PERSISTENT | BACKUP, FLOAT, "0.125"}},
+    {"DisableExcessiveActuationCheck", {PERSISTENT | BACKUP, BOOL, "0"}},

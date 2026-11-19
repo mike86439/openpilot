@@ -12,6 +12,24 @@ import pytest
 
 HARDWARED_PATH = Path(__file__).parents[1] / "hardwared.py"
 POWER_MONITORING_PATH = Path(__file__).parents[1] / "power_monitoring.py"
+HELPERS_PATH = HARDWARED_PATH.parents[2] / "selfdrive" / "selfdrived" / "helpers.py"
+
+
+def load_excessive_actuation_switch():
+  # The tree's own switch reader and the key it reads, taken the way this file takes hardwared's functions: exec
+  # the real source instead of importing the process around it. UnknownKeyName is a stand-in carrying the real
+  # name because no scenario here raises it - what it guards against in production is a compiled parameter
+  # registry older than the key, and that answer ("not disabled") is asserted by name, not by execution.
+  tree = ast.parse(HELPERS_PATH.read_text(encoding="utf-8"), filename=str(HELPERS_PATH))
+  selected = [node for node in tree.body if (
+    isinstance(node, ast.Assign) and any(isinstance(t, ast.Name) and t.id == "EXCESSIVE_ACTUATION_DISABLE_KEY"
+                                        for t in node.targets)
+  ) or (isinstance(node, ast.FunctionDef) and node.name == "excessive_actuation_disabled")]
+  assert len(selected) == 2, "helpers.py no longer defines the switch reader this test reads"
+  namespace = {"UnknownKeyName": type("UnknownKeyName", (KeyError,), {})}
+  module = ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[]))
+  exec(compile(module, str(HELPERS_PATH), "exec"), namespace)
+  return namespace["EXCESSIVE_ACTUATION_DISABLE_KEY"], namespace["excessive_actuation_disabled"]
 
 
 def load_hardwared_subset(*names: str, namespace: dict | None = None):
@@ -504,10 +522,15 @@ def test_worker_call_order_builds_snapshot_after_every_read():
 
 
 def test_startup_reads_pause_onroad_and_refresh_mutable_conditions_after_stop():
+  # refresh_startup_conditions asks helpers.py for the switch; the extracted reader is that same code, so this
+  # proves the tree's behaviour rather than the test's arithmetic.
+  _switch_key, excessive_actuation_disabled = load_excessive_actuation_switch()
+
   values = {
     "Offroad_ConnectivityNeeded": b"needed",
     "DisableUpdates": False,
     "SnoozeUpdate": True,
+    "DisableExcessiveActuationCheck": False,
     "Offroad_ExcessiveActuation": None,
     "DoUninstall": False,
     "HasAcceptedTerms": b"terms",
@@ -535,6 +558,7 @@ def test_startup_reads_pause_onroad_and_refresh_mutable_conditions_after_stop():
   namespace = {
     "HARDWARE": hardware,
     "apply_startup_policy": startup_policy,
+    "excessive_actuation_disabled": excessive_actuation_disabled,
     "log_slow_hardware_stage": timing,
     "terms_version": b"terms",
     "terms_version_sp": b"terms-sp",
@@ -548,6 +572,7 @@ def test_startup_reads_pause_onroad_and_refresh_mutable_conditions_after_stop():
     ("get", "Offroad_ConnectivityNeeded"),
     ("get_bool", "DisableUpdates"),
     ("get_bool", "SnoozeUpdate"),
+    ("get_bool", "DisableExcessiveActuationCheck"),
     ("get", "Offroad_ExcessiveActuation"),
     ("get_bool", "DoUninstall"),
     ("get", "HasAcceptedTerms"),
@@ -603,9 +628,29 @@ def test_startup_reads_pause_onroad_and_refresh_mutable_conditions_after_stop():
   # mutable startup condition after returning offroad.
   hardware.booted.assert_called_once()
 
+  # The switch, against the same stale alert the block above already has in values: with
+  # DisableExcessiveActuationCheck on, no_excessive_actuation answers True and every other condition is untouched.
+  # That is the difference between "the manager cannot start until the alert is acknowledged on screen" and a car
+  # that engages - this dict is the one hardwared feeds all(startup_conditions.values()) before should_start.
+  values["DisableExcessiveActuationCheck"] = True
+  refresh_startup_conditions(None, params, startup_conditions, stage_started, {}, 4)
+  assert startup_conditions["no_excessive_actuation"] is True
+  assert {k: v for k, v in startup_conditions.items() if k != "no_excessive_actuation"} == {
+    "up_to_date": False,
+    "not_uninstalling": False,
+    "accepted_terms": False,
+    "accepted_terms_sp": False,
+    "completed_training": False,
+    "not_driver_view": False,
+    "device_booted": True,
+  }
+
 
 def test_startup_read_ownership_and_refresh_precedes_restart_decision():
   tree = ast.parse(HARDWARED_PATH.read_text(encoding="utf-8"), filename=str(HARDWARED_PATH))
+  # The keys hardwared asks for itself. The one key it does not ask for directly is listed below: the excessive
+  # actuation switch is read through selfdrived.helpers, which is the only place that knows the exception a
+  # registry predating the key raises.
   startup_keys = {
     "Offroad_ConnectivityNeeded", "DisableUpdates", "SnoozeUpdate", "Offroad_ExcessiveActuation",
     "DoUninstall", "HasAcceptedTerms", "HasAcceptedTermsSP", "CompletedTrainingVersion",
@@ -617,6 +662,24 @@ def test_startup_read_ownership_and_refresh_precedes_restart_decision():
       found.append((owner, name, node.args[0].value))
   assert {owner for owner, _name, _key in found} == {"refresh_startup_conditions"}
   assert {key for _owner, _name, key in found} == startup_keys
+
+  switch_key, _reader = load_excessive_actuation_switch()
+  assert switch_key == "DisableExcessiveActuationCheck"
+  assert switch_key not in {key for _owner, _name, key in found}
+  # Registered, or the read is UnknownKeyName and the answer is "not disabled" forever.
+  from openpilot.nrdr.params.generated import ALL_KEYS
+  assert switch_key in ALL_KEYS
+  # hardwared reaches it by importing the reader and calling it where the alert itself is read.
+  imported = [node for node in tree.body if isinstance(node, ast.ImportFrom)
+              and node.module == "openpilot.selfdrive.selfdrived.helpers"
+              and any(a.name == "excessive_actuation_disabled" for a in node.names)]
+  assert len(imported) == 1
+  refresh_def = next(node for node in tree.body if isinstance(node, ast.FunctionDef)
+                     and node.name == "refresh_startup_conditions")
+  switch_calls = [node for node in ast.walk(refresh_def)
+                  if isinstance(node, ast.Call) and isinstance(node.func, ast.Name)
+                  and node.func.id == "excessive_actuation_disabled"]
+  assert len(switch_calls) == 1
 
   hardware_thread = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == "hardware_thread")
   loop = next(node for node in hardware_thread.body if isinstance(node, ast.While))

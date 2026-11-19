@@ -19,7 +19,7 @@ from openpilot.common.gps import get_gps_location_service
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET
-from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
+from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck, excessive_actuation_disabled
 from openpilot.selfdrive.selfdrived.state import StateMachine
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -84,8 +84,14 @@ class SelfdriveD(CruiseHelper):
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
-    self.excessive_actuation_check = ExcessiveActuationCheck()
-    self.excessive_actuation = self.params.get("Offroad_ExcessiveActuation") is not None
+    # DisableExcessiveActuationCheck off means this whole feature is off - see the comment on
+    # EXCESSIVE_ACTUATION_DISABLE_KEY in helpers.py. With the switch on the check is not constructed, no alert is
+    # written, and the stale Offroad_ExcessiveActuation left by an earlier drive is not read here, which is the
+    # half that restores lateral engagement: the event below is a NO_ENTRY every frame.
+    self.excessive_actuation_disabled = excessive_actuation_disabled(self.params)
+    self.excessive_actuation_check = None if self.excessive_actuation_disabled else ExcessiveActuationCheck()
+    self.excessive_actuation = (not self.excessive_actuation_disabled and
+                                self.params.get("Offroad_ExcessiveActuation") is not None)
     self.big_model_loading = False
     self.big_model_active = False
     self.big_model_failed = False
@@ -363,7 +369,7 @@ class SelfdriveD(CruiseHelper):
       device_motion = Pose.from_device_motion(self.sm['deviceMotion'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_motion)
 
-    if self.calibrated_pose is not None and not self.CP.notCar:
+    if self.calibrated_pose is not None and not self.CP.notCar and self.excessive_actuation_check is not None:
       excessive_actuation = self.excessive_actuation_check.update(self.sm, CS, self.calibrated_pose)
       if not self.excessive_actuation and excessive_actuation is not None:
         set_offroad_alert("Offroad_ExcessiveActuation", True, extra_text=str(excessive_actuation))

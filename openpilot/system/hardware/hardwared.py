@@ -17,6 +17,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_HW
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
+from openpilot.selfdrive.selfdrived.helpers import excessive_actuation_disabled
 from openpilot.common.hardware import HARDWARE, COMMA_HARDWARE
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.git import get_short_branch
@@ -173,7 +174,11 @@ def refresh_startup_conditions(started_ts: float | None, params: Params, startup
       stage_started = log_slow_hardware_stage("main", "snooze_update", stage_started, last_slow_stage_log, False, frame)
   startup_conditions["up_to_date"] = connectivity_needed is None or disable_updates or snooze_update
 
-  startup_conditions["no_excessive_actuation"] = params.get("Offroad_ExcessiveActuation") is None
+  # With DisableExcessiveActuationCheck on, a stale Offroad_ExcessiveActuation must not hold the stack off here
+  # either: this condition is inside the all(startup_conditions) test that only runs while the stack has not
+  # started, so left as upstream wrote it an alert from a drive the check no longer runs would keep the manager
+  # from starting until the alert was acknowledged on screen.
+  startup_conditions["no_excessive_actuation"] = excessive_actuation_disabled(params) or params.get("Offroad_ExcessiveActuation") is None
   stage_started = log_slow_hardware_stage("main", "excessive_actuation", stage_started, last_slow_stage_log, False, frame)
   startup_conditions["not_uninstalling"] = not params.get_bool("DoUninstall")
   stage_started = log_slow_hardware_stage("main", "do_uninstall", stage_started, last_slow_stage_log, False, frame)

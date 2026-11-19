@@ -25,14 +25,19 @@ from specs import (
 )
 
 
-REGISTRY_METADATA_SHA256 = "c4433c55bdfe7c6216a6db1f14d5f447d8645d981ef098f8d834c366dec9efd2"
+# Re-pinned 2026-11-19 for DisableExcessiveActuationCheck. The value before this (c4433c55…) did not match this
+# branch's own catalog: the specs at HEAD hash to 433d6e2a…, four keys ahead of what this test pinned.
+REGISTRY_METADATA_SHA256 = "0f0d8af82a0da606f81843f69f47aa0d778972b970b65a1ab09d792b154406d3"
 
 
 class TestParamCatalog(unittest.TestCase):
   def test_catalog_is_complete_and_unique(self) -> None:
     self.assertEqual(validate_catalog(), ())
-    self.assertEqual(len(PARAM_SPECS), 166)
-    self.assertEqual(len(ADDED_PARAM_SPECS), 165)
+    # 171 = the 170 specs this branch already had (the pin here said 166 for four keys that landed earlier, and
+    # test_pcm_mode_* / test_sensitive_and_retired_metadata_is_explicit are red for the same drift) plus
+    # DisableExcessiveActuationCheck.
+    self.assertEqual(len(PARAM_SPECS), 171)
+    self.assertEqual(len(ADDED_PARAM_SPECS), 170)
     self.assertEqual(len(OVERRIDDEN_PARAM_SPECS), 1)
     self.assertEqual(len(PARAM_SPECS_BY_KEY), len(PARAM_SPECS))
     from openpilot.nrdr.params.generated import ALL_KEYS, ADDED_KEYS, OVERRIDDEN_KEYS
@@ -50,6 +55,18 @@ class TestParamCatalog(unittest.TestCase):
     self.assertEqual(receipt.flags, (ParamFlag.PERSISTENT, ParamFlag.DONT_LOG))
     self.assertIsNone(receipt.default)
     self.assertIs(receipt.lifecycle, ParamLifecycle.STATE)
+
+  def test_excessive_actuation_switch_is_registered_off_and_shared_with_the_port(self) -> None:
+    # The one switch that turns the excessive-actuation check off. Default "0" is upstream's behaviour, so a car
+    # that never asks for it keeps the alert and the lateral-engagement refusal. It is deliberately not an
+    # `Nrdr*` key: the ptm111826 port registers the same name in its own common/params_keys.h, so one written
+    # value answers the same way on either tree, which is what a paired A/B drive needs.
+    spec = PARAM_SPECS_BY_KEY["DisableExcessiveActuationCheck"]
+    self.assertIs(spec.param_type, ParamType.BOOL)
+    self.assertIs(spec.lifecycle, ParamLifecycle.SETTING)
+    self.assertIs(spec.owner, ParamOwner.SYSTEM)
+    self.assertEqual(spec.default, "0")
+    self.assertEqual(spec.flags, (ParamFlag.PERSISTENT, ParamFlag.BACKUP))
 
   def test_device_yaw_switch_defaults_on_without_reviving_retired_sliders(self) -> None:
     spec = PARAM_SPECS_BY_KEY["NrdrDeviceYawCorrection"]

@@ -279,6 +279,12 @@ PARAM_SPECS: tuple[ParamSpec, ...] = (
   # Command delay remains distinct from model/actuator delay, live in seconds.
   _added("NrdrYawCommandDelayLow", ParamType.FLOAT, PB, "0.145", owner=ParamOwner.LATERAL),
   _added("NrdrYawCommandDelayHigh", ParamType.FLOAT, PB, "0.125", owner=ParamOwner.LATERAL),
+  # The excessive-actuation check and everything its alert makes sticky (offroad alert, manager startup block,
+  # the SOFT_DISABLE/NO_ENTRY event that refuses lateral control). "0" keeps upstream behaviour; "1" turns the
+  # feature off. Read only by selfdrive/selfdrived/helpers.py::excessive_actuation_disabled, from selfdrived and
+  # hardwared. Named without the Nrdr prefix and registered identically in the ptm111826 port's
+  # common/params_keys.h: one switch answers the same way whichever tree the car is running.
+  _added("DisableExcessiveActuationCheck", ParamType.BOOL, PB, "0", owner=ParamOwner.SYSTEM),
 )
 
 
